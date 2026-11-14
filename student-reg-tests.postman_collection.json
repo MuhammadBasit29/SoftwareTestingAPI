@@ -1,0 +1,4971 @@
+{
+ "info": {
+  "_postman_id": "fa91c49d-2e6d-4af8-9f47-cb39c3a5c784",
+  "name": "student-reg-tests",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ },
+ "item": [
+  {
+   "name": "Fetch contract",
+   "request": {
+    "method": "GET",
+    "header": [],
+    "url": {
+     "raw": "{{baseUrl}}/v3/api-docs",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "v3",
+      "api-docs"
+     ]
+    }
+   },
+   "event": [
+    {
+     "listen": "prerequest",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.collectionVariables.set('run', Date.now());"
+      ]
+     }
+    },
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.collectionVariables.set('contract', pm.response.text());",
+       "",
+       "function check(o) {",
+       "  const Ajv = require('ajv');",
+       "  const spec = JSON.parse(pm.collectionVariables.get('contract'));",
+       "  const ajv = new Ajv({ allErrors: true, unknownFormats: 'ignore', schemaId: 'auto', validateSchema: false, logger: false });",
+       "  ajv.addSchema(spec, 'spec');",
+       "",
+       "  pm.test(`${o.name} returns ${o.status}`, () => pm.response.to.have.status(o.status));",
+       "",
+       "  if (o.location) {",
+       "    pm.test(`${o.name} returns a Location header`, () => pm.response.to.have.header('Location'));",
+       "  }",
+       "  if (o.schema) {",
+       "    let body;",
+       "    try { body = pm.response.json(); } catch (e) { body = pm.response.text(); }",
+       "    const ref = { $ref: 'spec#/components/schemas/' + o.schema };",
+       "    pm.test(`${o.name} body matches ${o.schema}`, () => {",
+       "      const ok = ajv.validate(o.list ? { type: 'array', items: ref } : ref, body);",
+       "      pm.expect(ok, ajv.errorsText()).to.be.true;",
+       "    });",
+       "    const documented = spec.components.schemas[o.schema].properties;",
+       "    const items = o.list ? (Array.isArray(body) ? body : []) : [body];",
+       "    const extras = [...new Set(items.filter(x => x && typeof x === 'object')",
+       "      .flatMap(x => Object.keys(x).filter(k => !(k in documented))))];",
+       "    pm.test(`${o.name} has no undocumented fields`, () =>",
+       "      pm.expect(extras, 'Undocumented: ' + extras.join(', ')).to.be.empty);",
+       "  }",
+       "}",
+       "pm.collectionVariables.set('checkLib', check.toString());"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "Check contract against baseline",
+   "request": {
+    "method": "GET",
+    "header": [],
+    "url": {
+     "raw": "{{baseUrl}}/v3/api-docs",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "v3",
+      "api-docs"
+     ]
+    }
+   },
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "const live = pm.response.json();",
+       "const baseline = JSON.parse(pm.collectionVariables.get('baselineContract'));",
+       "",
+       "// Reduce a contract to the parts clients depend on.",
+       "const summarize = (spec) => {",
+       "  const summary = {};",
+       "  for (const [path, operations] of Object.entries(spec.paths)) {",
+       "    for (const [method, op] of Object.entries(operations)) {",
+       "      summary[method.toUpperCase() + ' ' + path] = {",
+       "        responses: Object.keys(op.responses).sort(),",
+       "        parameters: (op.parameters || []).map(p => p.in + ':' + p.name).sort()",
+       "      };",
+       "    }",
+       "  }",
+       "  for (const [name, schema] of Object.entries(spec.components.schemas)) {",
+       "    const props = {};",
+       "    for (const p of Object.keys(schema.properties || {}).sort()) {",
+       "      const def = schema.properties[p];",
+       "      props[p] = {",
+       "        // EXTENSION 1: data type of each property",
+       "        type: def.type || def.$ref || null,",
+       "        format: def.format || null,",
+       "        itemType: def.items ? (def.items.type || def.items.$ref || null) : null,",
+       "        // EXTENSION 2: allowed values of each enum",
+       "        enum: def.enum ? def.enum.slice().sort() : null",
+       "      };",
+       "    }",
+       "    summary['schema ' + name] = {",
+       "      properties: props,",
+       "      required: (schema.required || []).slice().sort()",
+       "    };",
+       "  }",
+       "  return summary;",
+       "};",
+       "",
+       "const before = summarize(baseline);",
+       "const after = summarize(live);",
+       "const allKeys = [...new Set([...Object.keys(before), ...Object.keys(after)])];",
+       "const changed = allKeys.filter(k => JSON.stringify(before[k]) !== JSON.stringify(after[k]));",
+       "",
+       "pm.test('Live contract matches the baseline', () => {",
+       "  pm.expect(changed, 'Changed: ' + changed.join(', ')).to.be.empty;",
+       "});"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "1 Students",
+   "item": [
+    {
+     "name": "Create a student",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/students",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"Ada Lovelace\",\"major\":\"Major-{{run}}\",\"gpa\":3.5}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Create student', status: 201, schema: 'StudentResponse', location: true });",
+         "try { pm.collectionVariables.set('studentId', pm.response.json().id); } catch (e) {}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Create student without name",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/students",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"major\":\"CS\",\"gpa\":3.0}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Create student without name', status: 400, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Get a student",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/{{studentId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "{{studentId}}"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Get student', status: 200, schema: 'StudentResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Get unknown student",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "999999999"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Get unknown student', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List students",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List students', status: 200, schema: 'StudentResponse', list: true });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List students by major",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students?major=Major-{{run}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students"
+       ],
+       "query": [
+        {
+         "key": "major",
+         "value": "Major-{{run}}"
+        }
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List students by major', status: 200, schema: 'StudentResponse', list: true });",
+         "const list = pm.response.json();",
+         "const major = 'Major-' + pm.collectionVariables.get('run');",
+         "pm.test('Major filter returns the student created in this run', () =>",
+         "  pm.expect(list.map(s => s.id)).to.include(Number(pm.collectionVariables.get('studentId'))));",
+         "pm.test('Every student returned has exactly the requested major', () =>",
+         "  list.forEach(s => pm.expect(s.major).to.eql(major)));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List students by unknown major",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students?major=NoSuchMajor",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students"
+       ],
+       "query": [
+        {
+         "key": "major",
+         "value": "NoSuchMajor"
+        }
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List students by unknown major', status: 200, schema: 'StudentResponse', list: true });",
+         "pm.test('Unknown major returns an empty list', () => pm.expect(pm.response.json()).to.be.empty);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Update a student",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/{{studentId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "{{studentId}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"Ada King\",\"major\":\"Major-{{run}}\",\"gpa\":3.6}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Update student', status: 200, schema: 'StudentResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Update student with invalid GPA",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/{{studentId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "{{studentId}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"Ada King\",\"major\":\"Math\",\"gpa\":5.0}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Update student with GPA above 4.0', status: 400, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Update unknown student",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "999999999"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"Ada King\",\"major\":\"Math\",\"gpa\":3.0}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Update unknown student', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List a student's courses",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/{{studentId}}/courses",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "{{studentId}}",
+        "courses"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List student courses', status: 200, schema: 'CourseResponse', list: true });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List courses of unknown student",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/999999999/courses",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "999999999",
+        "courses"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List courses of unknown student', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "2 Courses",
+   "item": [
+    {
+     "name": "Create a course",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"CS1-{{run}}\",\"instructor\":{{run}},\"maxSize\":30,\"room\":\"MCS 339\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Create course', status: 201, schema: 'CourseResponse', location: true });",
+         "try { pm.collectionVariables.set('courseId', pm.response.json().id); } catch (e) {}"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Create course with invalid maxSize",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"Bad\",\"instructor\":1,\"maxSize\":0,\"room\":\"X\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Create course with maxSize 0', status: 400, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Create course with unknown roster id",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"Bad\",\"instructor\":1,\"maxSize\":5,\"room\":\"X\",\"roster\":[999999999]}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Create course with unknown roster id', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Get a course",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/{{courseId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "{{courseId}}"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Get course', status: 200, schema: 'CourseResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Get unknown course",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "999999999"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Get unknown course', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List courses",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List courses', status: 200, schema: 'CourseResponse', list: true });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List courses by instructor",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses?instructorId={{run}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses"
+       ],
+       "query": [
+        {
+         "key": "instructorId",
+         "value": "{{run}}"
+        }
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List courses by instructor', status: 200, schema: 'CourseResponse', list: true });",
+         "const list = pm.response.json();",
+         "const instructor = Number(pm.collectionVariables.get('run'));",
+         "pm.test('Instructor filter returns the course created in this run', () =>",
+         "  pm.expect(list.map(c => c.id)).to.include(Number(pm.collectionVariables.get('courseId'))));",
+         "pm.test('Every course returned has the requested instructorId', () =>",
+         "  list.forEach(c => pm.expect(c.instructorId).to.eql(instructor)));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "List courses by unknown instructor",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses?instructorId=999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses"
+       ],
+       "query": [
+        {
+         "key": "instructorId",
+         "value": "999999999"
+        }
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'List courses by unknown instructor', status: 200, schema: 'CourseResponse', list: true });",
+         "pm.test('Unknown instructorId returns an empty list', () => pm.expect(pm.response.json()).to.be.empty);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Update a course",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/{{courseId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "{{courseId}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"CS1-{{run}}\",\"instructor\":{{run}},\"maxSize\":30,\"room\":\"MCS 400\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Update course', status: 200, schema: 'CourseResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Update unknown course",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "999999999"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"name\":\"X\",\"instructor\":1,\"maxSize\":5,\"room\":\"X\"}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Update unknown course', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "3 Rosters",
+   "item": [
+    {
+     "name": "Add a student to a course",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/addStudent/{{courseId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "addStudent",
+        "{{courseId}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{{studentId}}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Add student to course', status: 200, schema: 'CourseResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Add student to unknown course",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/addStudent/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "addStudent",
+        "999999999"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{{studentId}}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Add student to unknown course', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Get the number of students in a course",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/getEnrollment/{{courseId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "getEnrollment",
+        "{{courseId}}"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Get enrollment', status: 200, schema: null });",
+         "pm.test('Get enrollment returns a non-negative integer', () => {",
+         "  const n = pm.response.json();",
+         "  pm.expect(Number.isInteger(n) && n >= 0).to.be.true;",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Get enrollment of unknown course",
+     "request": {
+      "method": "GET",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/getEnrollment/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "getEnrollment",
+        "999999999"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Get enrollment of unknown course', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Remove a student from a course",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/removeStudent/{{courseId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "removeStudent",
+        "{{courseId}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"studentId\": {{studentId}}}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Remove student from course', status: 200, schema: 'CourseResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Remove student not on roster",
+     "request": {
+      "method": "PUT",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/removeStudent/{{courseId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "removeStudent",
+        "{{courseId}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\"studentId\": {{studentId}}}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Remove student not on roster', status: 409, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "4 Deletes",
+   "item": [
+    {
+     "name": "Delete a course",
+     "request": {
+      "method": "DELETE",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/{{courseId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "{{courseId}}"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Delete course', status: 204, schema: null });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Delete unknown course",
+     "request": {
+      "method": "DELETE",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/courses/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "courses",
+        "999999999"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Delete unknown course', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Delete a student",
+     "request": {
+      "method": "DELETE",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/{{studentId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "{{studentId}}"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Delete student', status: 204, schema: null });"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Delete unknown student",
+     "request": {
+      "method": "DELETE",
+      "header": [],
+      "url": {
+       "raw": "{{baseUrl}}/api/students/999999999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "students",
+        "999999999"
+       ]
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+         "check({ name: 'Delete unknown student', status: 404, schema: 'ErrorResponse' });"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Dynamic Tests",
+   "item": [
+    {
+     "name": "D01 Negative - create student without required major",
+     "item": [
+      {
+       "name": "Create student missing major -> 400 ErrorResponse",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"No Major\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+           "check({ name: 'Create student without major (StudentRequest.required)', status: 400, schema: 'ErrorResponse' });"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D02 Negative - malformed JSON body",
+     "item": [
+      {
+       "name": "Create student with malformed JSON -> 400 ErrorResponse",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\": \"Broken\", \"major\": ",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+           "check({ name: 'Malformed JSON is rejected (ErrorResponse for every error)', status: 400, schema: 'ErrorResponse' });"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D03 Negative - wrong type for gpa",
+     "item": [
+      {
+       "name": "Create student with gpa as text -> 400 ErrorResponse",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Type Test\",\"major\":\"Dyn\",\"gpa\":\"abc\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+           "check({ name: 'gpa of wrong type is rejected (gpa: number)', status: 400, schema: 'ErrorResponse' });"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D04 Boundary - GPA limits 0.0 and 4.0 (StudentRequest.gpa min 0, max 4)",
+     "item": [
+      {
+       "name": "GPA -0.01 (just below min)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"GPA Low Out\",\"major\":\"Dyn\",\"gpa\":-0.01}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('GPA -0.01 is rejected with 400', () => pm.response.to.have.status(400));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "GPA 0.0 (on min)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"GPA Low On\",\"major\":\"Dyn\",\"gpa\":0.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('GPA 0.0 is accepted (2xx)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "GPA 4.0 (on max)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"GPA High On\",\"major\":\"Dyn\",\"gpa\":4.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('GPA 4.0 is accepted (2xx)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "GPA 4.01 (just above max)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"GPA High Out\",\"major\":\"Dyn\",\"gpa\":4.01}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('GPA 4.01 is rejected with 400', () => pm.response.to.have.status(400));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D05 Boundary - student name length 1..100 (StudentRequest.name)",
+     "item": [
+      {
+       "name": "Name empty (below min)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Empty name is rejected with 400', () => pm.response.to.have.status(400));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Name 1 character (on min)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"A\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('1-character name is accepted (2xx)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Name 100 characters (on max)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"{{d05_n100}}\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "prerequest",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.collectionVariables.set('d05_n100', 'a'.repeat(100));",
+           "pm.collectionVariables.set('d05_n101', 'a'.repeat(101));"
+          ]
+         }
+        },
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('100-character name is accepted (2xx)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Name 101 characters (above max)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"{{d05_n101}}\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "prerequest",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.collectionVariables.set('d05_n100', 'a'.repeat(100));",
+           "pm.collectionVariables.set('d05_n101', 'a'.repeat(101));"
+          ]
+         }
+        },
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('101-character name is rejected with 400', () => pm.response.to.have.status(400));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D06 Workflow - course capacity: never more than maxSize (addStudentToCourse)",
+     "item": [
+      {
+       "name": "Setup: create course (D06-Course, maxSize 2)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D06-Course\",\"instructor\":7,\"maxSize\":2,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d06_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d06_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s1",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Cap One\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d06_s1', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d06_s1)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s2",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Cap Two\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d06_s2', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d06_s2)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s3",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Cap Three\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d06_s3', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d06_s3)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add student 1 of 2",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d06_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d06_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d06_s1}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add student 2 of 2 (course now full)",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d06_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d06_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d06_s2}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add student 3 to full course -> 409",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d06_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d06_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d06_s3}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Adding to a full course returns 409 (addStudentToCourse 409)', () => pm.response.to.have.status(409));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get course after capacity test",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d06_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d06_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const c = pm.response.json();",
+           "pm.test('Roster never exceeds maxSize (addStudentToCourse description)', () => pm.expect(c.roster.length).to.be.at.most(c.maxSize));",
+           "pm.test('Full course status is a documented enum value (OPEN or CLOSED)', () => pm.expect(['OPEN', 'CLOSED']).to.include(c.status));",
+           "pm.test('Full course is not OPEN for enrollment', () => pm.expect(c.status).to.not.eql('OPEN'));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 2)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d06_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d06_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 2 (getCourseEnrollment: number of students currently on the roster)', () => pm.expect(pm.response.json()).to.eql(2));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D07 State - enrolling the same student twice",
+     "item": [
+      {
+       "name": "Setup: create course (D07-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D07-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d07_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d07_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Dup Enroll\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d07_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d07_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "First enrollment",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d07_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d07_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d07_s}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Second enrollment of same student -> 409",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d07_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d07_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d07_s}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Duplicate enrollment returns 409 (addStudentToCourse 409: already on the roster)', () => pm.response.to.have.status(409));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 1)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d07_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d07_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 1 (duplicate add must not change the count)', () => pm.expect(pm.response.json()).to.eql(1));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D08 State - undo an enrollment, then undo again",
+     "item": [
+      {
+       "name": "Setup: create course (D08-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D08-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d08_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d08_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Undo Me\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d08_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d08_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Enroll student",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d08_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d08_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d08_s}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Remove student (contract body)",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/removeStudent/{{d08_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "removeStudent",
+          "{{d08_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"studentId\": {{d08_s}}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Remove with {\"studentId\": n} returns 200 (removeStudentFromCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Remove same student again -> 409",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/removeStudent/{{d08_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "removeStudent",
+          "{{d08_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"studentId\": {{d08_s}}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Removing a student not on the roster returns 409 (removeStudentFromCourse 409)', () => pm.response.to.have.status(409));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 0)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d08_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d08_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 0 (after undo the course is empty)', () => pm.expect(pm.response.json()).to.eql(0));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D09 Workflow - cross-endpoint consistency after enroll and remove",
+     "item": [
+      {
+       "name": "Setup: create course (D09-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D09-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d09_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d09_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Cross Check\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d09_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d09_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Enroll student",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d09_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d09_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d09_s}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Course roster shows the student",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d09_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d09_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const c = pm.response.json();",
+           "const sid = Number(pm.collectionVariables.get('d09_s'));",
+           "pm.test('Course roster contains the student as a {id, name} entry (CourseResponse.roster)', () =>",
+           "  pm.expect((c.roster || []).some(r => r && r.id === sid)).to.be.true);"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Student shows the course",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d09_s}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d09_s}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Student courses include D09-Course (StudentResponse.courses)', () => pm.expect(pm.response.json().courses).to.include('D09-Course'));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Student course list shows the course",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d09_s}}/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d09_s}}",
+          "courses"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('listStudentCourses returns 200', () => pm.response.to.have.status(200));",
+           "pm.test('listStudentCourses includes the course', () => {",
+           "  const list = pm.response.json();",
+           "  pm.expect(Array.isArray(list) && list.some(c => c.id === Number(pm.collectionVariables.get('d09_course')))).to.be.true;",
+           "});"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 1)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d09_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d09_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 1 (getCourseEnrollment: number of students currently on the roster)', () => pm.expect(pm.response.json()).to.eql(1));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Remove student (contract body)",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/removeStudent/{{d09_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "removeStudent",
+          "{{d09_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"studentId\": {{d09_s}}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Remove with {\"studentId\": n} returns 200 (removeStudentFromCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Course roster no longer shows the student",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d09_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d09_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const c = pm.response.json();",
+           "const sid = Number(pm.collectionVariables.get('d09_s'));",
+           "pm.test('Course roster no longer contains the student as a {id, name} entry (CourseResponse.roster)', () =>",
+           "  pm.expect((c.roster || []).some(r => r && r.id === sid)).to.be.false);"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Student no longer shows the course",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d09_s}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d09_s}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Student courses no longer include D09-Course', () => pm.expect(pm.response.json().courses).to.not.include('D09-Course'));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 0)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d09_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d09_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 0 (getCourseEnrollment: number of students currently on the roster)', () => pm.expect(pm.response.json()).to.eql(0));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D10 Alternate path - enroll via createStudent courses list",
+     "item": [
+      {
+       "name": "Setup: create course (D10-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D10-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d10_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d10_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Create student with courses [course]",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Via Student\",\"major\":\"Dyn\",\"gpa\":3.0,\"courses\":[{{d10_course}}]}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d10_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d10_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Course roster shows the student",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d10_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d10_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const c = pm.response.json();",
+           "const sid = Number(pm.collectionVariables.get('d10_s'));",
+           "pm.test('Course roster contains the student as a {id, name} entry (CourseResponse.roster)', () =>",
+           "  pm.expect((c.roster || []).some(r => r && r.id === sid)).to.be.true);",
+           "pm.test('Roster has exactly 1 student (createStudent: placed on the roster)', () => pm.expect(pm.response.json().roster.length).to.eql(1));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 1)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d10_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d10_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 1 (createStudent places the student on the roster)', () => pm.expect(pm.response.json()).to.eql(1));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D11 Alternate path - enroll via createCourse roster",
+     "item": [
+      {
+       "name": "Setup: create student s",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Via Course\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d11_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d11_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Create course with roster [student]",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D11-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\",\"roster\":[{{d11_s}}]}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d11_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d11_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 1)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d11_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d11_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 1 (a roster set at creation counts)', () => pm.expect(pm.response.json()).to.eql(1));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Student shows the course",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d11_s}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d11_s}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Student courses include D11-Course', () => pm.expect(pm.response.json().courses).to.include('D11-Course'));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D12 State - maxSize cannot go below roster size",
+     "item": [
+      {
+       "name": "Setup: create course (D12-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D12-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d12_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d12_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s1",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Shrink One\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d12_s1', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d12_s1)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s2",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Shrink Two\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d12_s2', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d12_s2)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add s1 to course",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d12_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d12_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d12_s1}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add s2 to course",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d12_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d12_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d12_s2}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Update course maxSize to 1 -> 400",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d12_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d12_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D12-Course\",\"instructor\":7,\"maxSize\":1,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+           "check({ name: 'maxSize below roster size is rejected (updateCourse 400)', status: 400, schema: 'ErrorResponse' });"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Create course with roster larger than maxSize -> 400",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D12-Over\",\"instructor\":7,\"maxSize\":1,\"room\":\"DYN 1\",\"roster\":[{{d12_s1}},{{d12_s2}}]}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "const check = eval('(' + pm.collectionVariables.get('checkLib') + ')');",
+           "check({ name: 'Initial roster larger than maxSize is rejected (createCourse 400)', status: 400, schema: 'ErrorResponse' });"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D13 State - update without roster keeps the roster",
+     "item": [
+      {
+       "name": "Setup: create course (D13-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D13-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d13_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d13_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Keep Me\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d13_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d13_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add s to course",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d13_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d13_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d13_s}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Update course without roster field",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d13_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d13_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D13-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 2\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Update course returns 200', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get course after update",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d13_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d13_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Roster still has 1 student (CourseRequest.roster: omitted = unchanged)', () => pm.expect(pm.response.json().roster.length).to.eql(1));",
+           "pm.test('Room was updated', () => pm.expect(pm.response.json().room).to.eql('DYN 2'));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D14 Data variation - two students with the same name",
+     "item": [
+      {
+       "name": "Setup: create course (D14-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D14-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d14_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d14_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s1",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Pat Same\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d14_s1', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d14_s1)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s2",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Pat Same\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d14_s2', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d14_s2)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add s1 to course",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d14_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d14_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d14_s1}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add s2 to course",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d14_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d14_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d14_s2}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get course with two same-name students",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d14_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d14_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Roster has one entry per student, 2 entries (CourseResponse.roster)', () => pm.expect(pm.response.json().roster.length).to.eql(2));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 2)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d14_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d14_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 2 (getCourseEnrollment: number of students currently on the roster)', () => pm.expect(pm.response.json()).to.eql(2));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D15 Data variation - optional fields omitted",
+     "item": [
+      {
+       "name": "Create course without instructor",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D15-Course\",\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d15_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d15_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get course without instructor",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d15_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d15_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Course without optional instructor can be read (200)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Create student without courses or dateOfBirth",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Minimal\",\"major\":\"Dyn\",\"gpa\":2.5}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d15_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d15_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get minimal student",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d15_s}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d15_s}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Minimal student can be read (200)', () => pm.response.to.have.status(200));",
+           "pm.test('courses is an empty array, not null (StudentResponse.courses required)', () => pm.expect(pm.response.json().courses).to.be.an('array').that.is.empty);"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D16 Workflow - delete a student who is enrolled (deleteStudent)",
+     "item": [
+      {
+       "name": "Setup: create course (D16-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D16-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d16_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d16_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Leaving Student\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d16_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d16_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add s to course",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d16_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d16_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d16_s}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 1)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d16_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d16_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 1 (getCourseEnrollment: number of students currently on the roster)', () => pm.expect(pm.response.json()).to.eql(1));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Delete the enrolled student",
+       "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d16_s}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d16_s}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Deleting an enrolled student succeeds (2xx)', () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Course roster no longer has the student",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d16_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d16_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Course still readable after student delete', () => pm.response.to.have.status(200));",
+           "pm.test('Roster is empty after deleting its only student (deleteStudent: removed from every roster)', () => pm.expect(pm.response.json().roster.length).to.eql(0));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get enrollment (expect 0)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/getEnrollment/{{d16_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "getEnrollment",
+          "{{d16_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enrollment count is 0 (deleted student removed from the roster)', () => pm.expect(pm.response.json()).to.eql(0));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D17 Lifecycle - delete a course that has students (deleteCourse)",
+     "item": [
+      {
+       "name": "Setup: create course (D17-Course, maxSize 5)",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"D17-Course\",\"instructor\":7,\"maxSize\":5,\"room\":\"DYN 1\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d17_course', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d17_course)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Setup: create student s",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Stays Behind\",\"major\":\"Dyn\",\"gpa\":3.0}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d17_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d17_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Add s to course",
+       "request": {
+        "method": "PUT",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/addStudent/{{d17_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "addStudent",
+          "{{d17_course}}"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{{d17_s}}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Enroll succeeds with 200 (addStudentToCourse)', () => pm.response.to.have.status(200));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Delete the course",
+       "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/courses/{{d17_course}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "courses",
+          "{{d17_course}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Delete course returns 204', () => pm.response.to.have.status(204));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Student still exists",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d17_s}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d17_s}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('Student is not deleted with the course (deleteCourse description)', () => pm.response.to.have.status(200));",
+           "pm.test('Student no longer lists the deleted course', () => pm.expect(pm.response.json().courses).to.not.include('D17-Course'));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "D18 Data protection - dateOfBirth is never returned",
+     "item": [
+      {
+       "name": "Create student with dateOfBirth",
+       "request": {
+        "method": "POST",
+        "header": [
+         {
+          "key": "Content-Type",
+          "value": "application/json"
+         }
+        ],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        },
+        "body": {
+         "mode": "raw",
+         "raw": "{\"name\":\"Private Person\",\"major\":\"Dyn\",\"gpa\":3.0,\"dateOfBirth\":\"1999-12-31\"}",
+         "options": {
+          "raw": {
+           "language": "json"
+          }
+         }
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "try { pm.collectionVariables.set('d18_s', pm.response.json().id); } catch (e) {}",
+           "pm.test('Setup: created (d18_s)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+           "pm.test('dateOfBirth is never returned (StudentRequest.dateOfBirth: writeOnly)', () => pm.expect(pm.response.text()).to.not.include('1999-12-31'));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Get student",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/{{d18_s}}",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "{{d18_s}}"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('dateOfBirth is never returned (StudentRequest.dateOfBirth: writeOnly)', () => pm.expect(pm.response.text()).to.not.include('1999-12-31'));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "List students",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('dateOfBirth is never returned (StudentRequest.dateOfBirth: writeOnly)', () => pm.expect(pm.response.text()).to.not.include('1999-12-31'));"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "name": "Export endpoint (not in contract, found in StudentController)",
+       "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+         "raw": "{{baseUrl}}/api/students/export",
+         "host": [
+          "{{baseUrl}}"
+         ],
+         "path": [
+          "api",
+          "students",
+          "export"
+         ]
+        }
+       },
+       "event": [
+        {
+         "listen": "test",
+         "script": {
+          "type": "text/javascript",
+          "exec": [
+           "pm.test('dateOfBirth is never returned (StudentRequest.dateOfBirth: writeOnly)', () => pm.expect(pm.response.text()).to.not.include('1999-12-31'));",
+           "pm.test('No undocumented endpoint exposes student data (export is not in the contract)', () => pm.expect(pm.response.code).to.be.oneOf([404, 405]));"
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "variable": [
+  {
+   "key": "baseUrl",
+   "value": "http://localhost:8080"
+  },
+  {
+   "key": "baselineContract",
+   "value": "{\n  \"openapi\": \"3.0.1\",\n  \"info\": {\n    \"title\": \"Student Registration API\",\n    \"description\": \"Manages students, courses, and course rosters.\\n\\nAll error responses use the `ErrorResponse` schema unless an operation says otherwise.\\nData is stored in memory and is cleared each time the service restarts.\",\n    \"version\": \"1.0.0\"\n  },\n  \"servers\": [\n    {\n      \"url\": \"http://localhost:8080\",\n      \"description\": \"Local development server\"\n    }\n  ],\n  \"tags\": [\n    {\n      \"name\": \"Students\",\n      \"description\": \"Create, read, update, and delete students\"\n    },\n    {\n      \"name\": \"Courses\",\n      \"description\": \"Create, read, update, and delete courses\"\n    },\n    {\n      \"name\": \"Rosters\",\n      \"description\": \"Enroll students in courses and report enrollment\"\n    }\n  ],\n  \"paths\": {\n    \"/api/students/{id}\": {\n      \"get\": {\n        \"tags\": [\n          \"Students\"\n        ],\n        \"summary\": \"Get a student\",\n        \"operationId\": \"getStudent\",\n        \"parameters\": [\n          {\n            \"name\": \"id\",\n            \"in\": \"path\",\n            \"description\": \"Id of the student.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The student.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/StudentResponse\"\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No student has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      },\n      \"put\": {\n        \"tags\": [\n          \"Students\"\n        ],\n        \"summary\": \"Update a student\",\n        \"description\": \"Replaces the student's details and, when `courses` is supplied, their course enrollments.\",\n        \"operationId\": \"updateStudent\",\n        \"parameters\": [\n          {\n            \"name\": \"id\",\n            \"in\": \"path\",\n            \"description\": \"Id of the student.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"requestBody\": {\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"$ref\": \"#/components/schemas/StudentRequest\"\n              }\n            }\n          },\n          \"required\": true\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The updated student.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/StudentResponse\"\n                }\n              }\n            }\n          },\n          \"400\": {\n            \"description\": \"The request failed validation.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No student has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      },\n      \"delete\": {\n        \"tags\": [\n          \"Students\"\n        ],\n        \"summary\": \"Delete a student\",\n        \"description\": \"Deletes the student and removes them from the roster of every course they are enrolled in.\",\n        \"operationId\": \"deleteStudent\",\n        \"parameters\": [\n          {\n            \"name\": \"id\",\n            \"in\": \"path\",\n            \"description\": \"Id of the student.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"responses\": {\n          \"204\": {\n            \"description\": \"The student was deleted.\"\n          },\n          \"404\": {\n            \"description\": \"No student has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/api/courses/{id}\": {\n      \"get\": {\n        \"tags\": [\n          \"Courses\"\n        ],\n        \"summary\": \"Get a course\",\n        \"operationId\": \"getCourse\",\n        \"parameters\": [\n          {\n            \"name\": \"id\",\n            \"in\": \"path\",\n            \"description\": \"Id of the course.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The course.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/CourseResponse\"\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No course has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      },\n      \"put\": {\n        \"tags\": [\n          \"Courses\"\n        ],\n        \"summary\": \"Update a course\",\n        \"description\": \"Replaces the course's details and, when `roster` is supplied, its roster.\",\n        \"operationId\": \"updateCourse\",\n        \"parameters\": [\n          {\n            \"name\": \"id\",\n            \"in\": \"path\",\n            \"description\": \"Id of the course.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"requestBody\": {\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"$ref\": \"#/components/schemas/CourseRequest\"\n              }\n            }\n          },\n          \"required\": true\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The updated course.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/CourseResponse\"\n                }\n              }\n            }\n          },\n          \"400\": {\n            \"description\": \"The request failed validation, or `maxSize` is below the size of the roster.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No course has this id, or `roster` contains an id that does not belong to a student.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      },\n      \"delete\": {\n        \"tags\": [\n          \"Courses\"\n        ],\n        \"summary\": \"Delete a course\",\n        \"description\": \"Deletes the course. The students on its roster are not deleted.\",\n        \"operationId\": \"deleteCourse\",\n        \"parameters\": [\n          {\n            \"name\": \"id\",\n            \"in\": \"path\",\n            \"description\": \"Id of the course.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"responses\": {\n          \"204\": {\n            \"description\": \"The course was deleted.\"\n          },\n          \"404\": {\n            \"description\": \"No course has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/api/courses/removeStudent/{courseId}\": {\n      \"put\": {\n        \"tags\": [\n          \"Rosters\"\n        ],\n        \"summary\": \"Remove a student from a course\",\n        \"operationId\": \"removeStudentFromCourse\",\n        \"parameters\": [\n          {\n            \"name\": \"courseId\",\n            \"in\": \"path\",\n            \"description\": \"Id of the course.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"requestBody\": {\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"$ref\": \"#/components/schemas/RosterChangeRequest\"\n              }\n            }\n          },\n          \"required\": true\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The course with its updated roster.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/CourseResponse\"\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No course or no student has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          },\n          \"409\": {\n            \"description\": \"The student is not on the roster.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/api/courses/addStudent/{courseId}\": {\n      \"put\": {\n        \"tags\": [\n          \"Rosters\"\n        ],\n        \"summary\": \"Add a student to a course\",\n        \"description\": \"Adds the student to the roster. The body is the student's id as a bare JSON number. A course can never hold more than `maxSize` students.\",\n        \"operationId\": \"addStudentToCourse\",\n        \"parameters\": [\n          {\n            \"name\": \"courseId\",\n            \"in\": \"path\",\n            \"description\": \"Id of the course.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"requestBody\": {\n          \"description\": \"Id of the student.\",\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"type\": \"integer\",\n                \"format\": \"int64\",\n                \"example\": 1\n              }\n            }\n          },\n          \"required\": true\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The course with its updated roster.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/CourseResponse\"\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No course or no student has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          },\n          \"409\": {\n            \"description\": \"The course is full, or the student is already on the roster.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/api/students\": {\n      \"get\": {\n        \"tags\": [\n          \"Students\"\n        ],\n        \"summary\": \"List students\",\n        \"description\": \"Returns every student, optionally limited to a single major.\",\n        \"operationId\": \"listStudents\",\n        \"parameters\": [\n          {\n            \"name\": \"major\",\n            \"in\": \"query\",\n            \"description\": \"Return only students with exactly this major.\",\n            \"required\": false,\n            \"schema\": {\n              \"type\": \"string\"\n            },\n            \"example\": \"Computer Science\"\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The matching students. The list is empty when nothing matches.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"array\",\n                  \"items\": {\n                    \"$ref\": \"#/components/schemas/StudentResponse\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      },\n      \"post\": {\n        \"tags\": [\n          \"Students\"\n        ],\n        \"summary\": \"Create a student\",\n        \"description\": \"Creates a student and places them on the roster of any courses listed in `courses`.\",\n        \"operationId\": \"createStudent\",\n        \"requestBody\": {\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"$ref\": \"#/components/schemas/StudentRequest\"\n              }\n            }\n          },\n          \"required\": true\n        },\n        \"responses\": {\n          \"201\": {\n            \"description\": \"The student was created.\",\n            \"headers\": {\n              \"Location\": {\n                \"description\": \"URL of the new student.\",\n                \"style\": \"simple\",\n                \"schema\": {\n                  \"type\": \"string\"\n                }\n              }\n            },\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/StudentResponse\"\n                }\n              }\n            }\n          },\n          \"400\": {\n            \"description\": \"The request failed validation.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/api/courses\": {\n      \"get\": {\n        \"tags\": [\n          \"Courses\"\n        ],\n        \"summary\": \"List courses\",\n        \"description\": \"Returns every course, optionally limited to a single instructor.\",\n        \"operationId\": \"listCourses\",\n        \"parameters\": [\n          {\n            \"name\": \"instructorId\",\n            \"in\": \"query\",\n            \"description\": \"Return only courses taught by this instructor.\",\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 2\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The matching courses. The list is empty when nothing matches.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"array\",\n                  \"items\": {\n                    \"$ref\": \"#/components/schemas/CourseResponse\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      },\n      \"post\": {\n        \"tags\": [\n          \"Courses\"\n        ],\n        \"summary\": \"Create a course\",\n        \"description\": \"Creates a course, optionally with an initial roster.\",\n        \"operationId\": \"createCourse\",\n        \"requestBody\": {\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"$ref\": \"#/components/schemas/CourseRequest\"\n              }\n            }\n          },\n          \"required\": true\n        },\n        \"responses\": {\n          \"201\": {\n            \"description\": \"The course was created.\",\n            \"headers\": {\n              \"Location\": {\n                \"description\": \"URL of the new course.\",\n                \"style\": \"simple\",\n                \"schema\": {\n                  \"type\": \"string\"\n                }\n              }\n            },\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/CourseResponse\"\n                }\n              }\n            }\n          },\n          \"400\": {\n            \"description\": \"The request failed validation, or the initial roster is larger than `maxSize`.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"`roster` contains an id that does not belong to a student.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/api/students/{id}/courses\": {\n      \"get\": {\n        \"tags\": [\n          \"Students\"\n        ],\n        \"summary\": \"List a student's courses\",\n        \"description\": \"Returns the full details of each course the student is enrolled in.\",\n        \"operationId\": \"listStudentCourses\",\n        \"parameters\": [\n          {\n            \"name\": \"id\",\n            \"in\": \"path\",\n            \"description\": \"Id of the student.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The student's courses.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"array\",\n                  \"items\": {\n                    \"$ref\": \"#/components/schemas/CourseResponse\"\n                  }\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No student has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/api/courses/getEnrollment/{courseId}\": {\n      \"get\": {\n        \"tags\": [\n          \"Rosters\"\n        ],\n        \"summary\": \"Get the number of students in a course\",\n        \"description\": \"Returns the number of students currently on the roster.\",\n        \"operationId\": \"getCourseEnrollment\",\n        \"parameters\": [\n          {\n            \"name\": \"courseId\",\n            \"in\": \"path\",\n            \"description\": \"Id of the course.\",\n            \"required\": true,\n            \"schema\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\"\n            },\n            \"example\": 1\n          }\n        ],\n        \"responses\": {\n          \"200\": {\n            \"description\": \"The number of students on the roster.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"minimum\": 0,\n                  \"type\": \"integer\",\n                  \"format\": \"int64\",\n                  \"example\": 12\n                }\n              }\n            }\n          },\n          \"404\": {\n            \"description\": \"No course has this id.\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  },\n  \"components\": {\n    \"schemas\": {\n      \"StudentRequest\": {\n        \"required\": [\n          \"gpa\",\n          \"major\",\n          \"name\"\n        ],\n        \"type\": \"object\",\n        \"properties\": {\n          \"name\": {\n            \"maxLength\": 100,\n            \"minLength\": 1,\n            \"type\": \"string\",\n            \"description\": \"Full name of the student.\",\n            \"example\": \"Sherlock Holmes\"\n          },\n          \"major\": {\n            \"maxLength\": 255,\n            \"minLength\": 1,\n            \"type\": \"string\",\n            \"description\": \"Declared major.\",\n            \"example\": \"Computer Science\"\n          },\n          \"gpa\": {\n            \"maximum\": 4,\n            \"exclusiveMaximum\": false,\n            \"minimum\": 0,\n            \"exclusiveMinimum\": false,\n            \"type\": \"number\",\n            \"description\": \"Grade point average on a 4.0 scale.\",\n            \"format\": \"double\",\n            \"example\": 3.75\n          },\n          \"courses\": {\n            \"type\": \"array\",\n            \"description\": \"Ids of the courses to enroll this student in. The student is added to the roster of each course. On an update, the list replaces the student's current courses.\",\n            \"items\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\",\n              \"example\": 1\n            }\n          },\n          \"dateOfBirth\": {\n            \"type\": \"string\",\n            \"description\": \"Date of birth. Protected student data: it is accepted on write and is never returned by the API.\",\n            \"format\": \"date\",\n            \"writeOnly\": true,\n            \"example\": \"2004-01-06\"\n          }\n        },\n        \"description\": \"The fields a client supplies to create or update a student.\"\n      },\n      \"StudentResponse\": {\n        \"required\": [\n          \"courses\",\n          \"gpa\",\n          \"id\",\n          \"major\",\n          \"name\"\n        ],\n        \"type\": \"object\",\n        \"properties\": {\n          \"id\": {\n            \"type\": \"integer\",\n            \"description\": \"Unique id assigned by the service.\",\n            \"format\": \"int64\",\n            \"example\": 1\n          },\n          \"name\": {\n            \"type\": \"string\",\n            \"description\": \"Full name of the student.\",\n            \"example\": \"Sherlock Holmes\"\n          },\n          \"major\": {\n            \"type\": \"string\",\n            \"description\": \"Declared major.\",\n            \"example\": \"Computer Science\"\n          },\n          \"gpa\": {\n            \"maximum\": 4,\n            \"minimum\": 0,\n            \"type\": \"number\",\n            \"description\": \"Grade point average on a 4.0 scale.\",\n            \"format\": \"double\",\n            \"example\": 3.75\n          },\n          \"courses\": {\n            \"uniqueItems\": true,\n            \"type\": \"array\",\n            \"description\": \"Names of the courses this student is enrolled in, with one entry per course.\",\n            \"items\": {\n              \"type\": \"string\",\n              \"example\": \"CS1\"\n            }\n          }\n        },\n        \"description\": \"A student as returned by the API.\"\n      },\n      \"ErrorResponse\": {\n        \"required\": [\n          \"error\",\n          \"message\",\n          \"path\",\n          \"status\",\n          \"timestamp\"\n        ],\n        \"type\": \"object\",\n        \"properties\": {\n          \"timestamp\": {\n            \"type\": \"string\",\n            \"description\": \"When the error occurred.\",\n            \"format\": \"date-time\",\n            \"example\": \"2026-11-06T14:30:00Z\"\n          },\n          \"status\": {\n            \"type\": \"integer\",\n            \"description\": \"HTTP status code.\",\n            \"format\": \"int32\",\n            \"example\": 404\n          },\n          \"error\": {\n            \"type\": \"string\",\n            \"description\": \"HTTP status phrase.\",\n            \"example\": \"Not Found\"\n          },\n          \"message\": {\n            \"type\": \"string\",\n            \"description\": \"What went wrong.\",\n            \"example\": \"No such student exists.\"\n          },\n          \"path\": {\n            \"type\": \"string\",\n            \"description\": \"The path that was requested.\",\n            \"example\": \"/api/students/99\"\n          }\n        },\n        \"description\": \"The standard body of an error response.\"\n      },\n      \"CourseRequest\": {\n        \"required\": [\n          \"maxSize\",\n          \"name\",\n          \"room\"\n        ],\n        \"type\": \"object\",\n        \"properties\": {\n          \"name\": {\n            \"maxLength\": 255,\n            \"minLength\": 1,\n            \"type\": \"string\",\n            \"description\": \"Name of the course.\",\n            \"example\": \"CS1\"\n          },\n          \"instructor\": {\n            \"minimum\": 1,\n            \"type\": \"integer\",\n            \"description\": \"Id of the instructor teaching the course.\",\n            \"format\": \"int64\",\n            \"example\": 2\n          },\n          \"maxSize\": {\n            \"minimum\": 1,\n            \"type\": \"integer\",\n            \"description\": \"Maximum number of students the course can hold. It cannot be set below the number of students already on the roster.\",\n            \"format\": \"int32\",\n            \"example\": 30\n          },\n          \"room\": {\n            \"maxLength\": 255,\n            \"minLength\": 1,\n            \"type\": \"string\",\n            \"description\": \"Room where the course meets.\",\n            \"example\": \"MCS 339\"\n          },\n          \"roster\": {\n            \"type\": \"array\",\n            \"description\": \"Ids of the students to place on the roster. When omitted from an update, the roster is left unchanged. Every id must belong to an existing student.\",\n            \"items\": {\n              \"type\": \"integer\",\n              \"format\": \"int64\",\n              \"example\": 1\n            }\n          }\n        },\n        \"description\": \"The fields a client supplies to create or update a course.\"\n      },\n      \"CourseResponse\": {\n        \"required\": [\n          \"id\",\n          \"instructorId\",\n          \"maxSize\",\n          \"name\",\n          \"room\",\n          \"roster\",\n          \"status\"\n        ],\n        \"type\": \"object\",\n        \"properties\": {\n          \"id\": {\n            \"type\": \"integer\",\n            \"description\": \"Unique id assigned by the service.\",\n            \"format\": \"int64\",\n            \"example\": 1\n          },\n          \"name\": {\n            \"type\": \"string\",\n            \"description\": \"Name of the course.\",\n            \"example\": \"CS1\"\n          },\n          \"instructorId\": {\n            \"type\": \"integer\",\n            \"description\": \"Id of the instructor teaching the course.\",\n            \"format\": \"int64\",\n            \"example\": 2\n          },\n          \"maxSize\": {\n            \"type\": \"integer\",\n            \"description\": \"Maximum number of students the course can hold.\",\n            \"format\": \"int32\",\n            \"example\": 30\n          },\n          \"room\": {\n            \"type\": \"string\",\n            \"description\": \"Room where the course meets.\",\n            \"example\": \"MCS 339\"\n          },\n          \"roster\": {\n            \"type\": \"array\",\n            \"description\": \"The students on the roster, with one entry per student.\",\n            \"items\": {\n              \"$ref\": \"#/components/schemas/StudentSummary\"\n            }\n          },\n          \"status\": {\n            \"type\": \"string\",\n            \"description\": \"Whether the course is accepting enrollments.\",\n            \"example\": \"OPEN\",\n            \"enum\": [\n              \"OPEN\",\n              \"CLOSED\"\n            ]\n          }\n        },\n        \"description\": \"A course as returned by the API.\"\n      },\n      \"StudentSummary\": {\n        \"required\": [\n          \"id\",\n          \"name\"\n        ],\n        \"type\": \"object\",\n        \"properties\": {\n          \"id\": {\n            \"type\": \"integer\",\n            \"description\": \"Unique id of the student.\",\n            \"format\": \"int64\",\n            \"example\": 1\n          },\n          \"name\": {\n            \"type\": \"string\",\n            \"description\": \"Full name of the student.\",\n            \"example\": \"Sherlock Holmes\"\n          }\n        },\n        \"description\": \"The short form of a student used in a course roster.\"\n      },\n      \"RosterChangeRequest\": {\n        \"required\": [\n          \"studentId\"\n        ],\n        \"type\": \"object\",\n        \"properties\": {\n          \"studentId\": {\n            \"type\": \"integer\",\n            \"description\": \"Id of the student.\",\n            \"format\": \"int64\",\n            \"example\": 1\n          }\n        },\n        \"description\": \"Identifies the student to take off a course roster.\"\n      }\n    }\n  }\n}\n"
+  },
+  {
+   "key": "run",
+   "value": ""
+  },
+  {
+   "key": "studentId",
+   "value": ""
+  },
+  {
+   "key": "courseId",
+   "value": ""
+  },
+  {
+   "key": "contract",
+   "value": ""
+  },
+  {
+   "key": "checkLib",
+   "value": ""
+  }
+ ]
+}
